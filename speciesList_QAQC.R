@@ -41,6 +41,8 @@
 library(tidyverse)
 library(worrms)
 library(janitor)
+library(tidystringdist)
+library(fuzzyjoin)
 
 # fuction for "%notin%
 `%notin%` <- Negate(`%in%`)
@@ -49,7 +51,27 @@ library(janitor)
 # READ IN AND PREPARE DATA                                                  ####
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+# import full species list
 raw_spp <- read_csv("data/KBL_Species_List-InProgress - Raw_Species_List.csv")
+
+# import plant/fungus/lichen list for comparison
+plant_list <- read_csv("data/Comprehensive_Checklist.csv")
+
+# harmonize with other column names and reduce
+reduced_plants <- plant_list %>%
+  select("Name",
+         "Status",
+         "Accepted Name",
+         "Family",
+         "Name Source",
+         "Level") %>%
+  rename("Scientific Name" = "Name",
+         "status" = "Status",
+         "valid_name" = "Accepted Name",
+         "family" = "Family",
+         "source" = "Name Source",
+         "rank" = "Level")
+  
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # SCRAPE WORMS DATA                                                         ####
@@ -80,16 +102,16 @@ raw_list_10 <- raw_list[1026:1100]
 raw_list_11 <- raw_list[1101:1138]
 
 # scrape WORMS for species list
-TaxWorms_1 <- wm_records_names(name = c(raw_list_1))
+TaxWorms_1 <- wm_records_names(name = c(raw_list_1), fuzzy = TRUE)
 TaxWormsTib_1 <- data.table::rbindlist(TaxWorms_1)
 
-TaxWorms_2 <- wm_records_names(name = c(raw_list_2))
+TaxWorms_2 <- wm_records_names(name = c(raw_list_2), fuzzy = TRUE)
 TaxWormsTib_2 <- data.table::rbindlist(TaxWorms_2)
 
-TaxWorms_3 <- wm_records_names(name = c(raw_list_3))
+TaxWorms_3 <- wm_records_names(name = c(raw_list_3), fuzzy = TRUE)
 TaxWormsTib_3 <- data.table::rbindlist(TaxWorms_3)
 
-TaxWorms_4 <- wm_records_names(name = c(raw_list_4))
+TaxWorms_4 <- wm_records_names(name = c(raw_list_4), fuzzy = TRUE)
 TaxWormsTib_4 <- data.table::rbindlist(TaxWorms_4)
 
 TaxWorms_5 <- wm_records_names(name = c(raw_list_5))
@@ -143,19 +165,46 @@ minus_dupes <- all_taxa %>%
 updated_taxa <- bind_rows(dupes,
                           minus_dupes)
 
-# remove species with already correct taxa
-unaccepted_taxa <- updated_taxa %>%
-  filter(status != "accepted")
-
 # add timestamp column
-unaccepted_taxa$`Date Taxonomy Updated` <- Sys.Date()
+updated_taxa$`Date Taxonomy Updated` <- Sys.Date()
+
+# add source column
+updated_taxa$source <- "WORMS"
 
 # add columns back into raw_spp data table
-final_taxa <- raw_spp %>%
-  left_join(unaccepted_taxa, by =  "Scientific Name")
+worms_taxa <- raw_spp %>%
+  left_join(updated_taxa, by =  "Scientific Name") %>%
+  mutate_all(funs(str_replace(., "â€™", "'")))
+
+
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# CHECK PLANT TAXA                                                          ####
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+plant_match <- reduced_plants %>%
+  stringdist_inner_join((raw_spp %>%
+                           filter(!is.na(`Scientific Name`))), 
+                       by = "Scientific Name",
+                       method = "soundex")
+
+
+
+
+
+
+
+
+
+
+
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# WRITE CSV                                                                 ####
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # write csv 
-write_csv(final_taxa, "UpdatedTaxa.csv")
+write_csv(worms_taxa, "UpdatedTaxa.csv")
 
 ############### SUBSECTION HERE
 
@@ -163,3 +212,8 @@ write_csv(final_taxa, "UpdatedTaxa.csv")
 #<<<<<<<<<<<<<<<<<<<<<<<<<<END OF SCRIPT>>>>>>>>>>>>>>>>>>>>>>>>#
 
 # SCRATCH PAD ####
+
+
+
+
+

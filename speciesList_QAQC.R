@@ -1,10 +1,10 @@
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #                                                                             ##
 # Species list for Kachemak Bay, AK, USA                                      ##
-# Script created yyyy-mm-dd                                                   ##
-# Data source: NAME/ORG                                                       ##
-# R code prepared by NAME                                                     ##
-# Last updated yyyy-mm-dd                                                     ##
+# Script created 2024-01-23                                                   ##
+# Data source: NOAA-NCCOS-KBL                                                 ##
+# R code prepared by Ross Whippo                                              ##
+# Last updated 2024-02-21                                                     ##
 #                                                                             ##
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -12,7 +12,7 @@
 
 
 # Required Files (check that script is loading latest version):
-# FILE.csv
+# KBL_Species_List-InProgress - Raw_Species_List.csv
 
 # Associated Scripts:
 # NONE
@@ -114,29 +114,28 @@ TaxWormsTib_3 <- data.table::rbindlist(TaxWorms_3)
 TaxWorms_4 <- wm_records_names(name = c(raw_list_4), fuzzy = TRUE)
 TaxWormsTib_4 <- data.table::rbindlist(TaxWorms_4)
 
-TaxWorms_5 <- wm_records_names(name = c(raw_list_5))
+TaxWorms_5 <- wm_records_names(name = c(raw_list_5), fuzzy = TRUE)
 TaxWormsTib_5 <- data.table::rbindlist(TaxWorms_5)
 
-TaxWorms_6 <- wm_records_names(name = c(raw_list_6))
+TaxWorms_6 <- wm_records_names(name = c(raw_list_6), fuzzy = TRUE)
 TaxWormsTib_6 <- data.table::rbindlist(TaxWorms_6)
 
-TaxWorms_7 <- wm_records_names(name = c(raw_list_7))
+TaxWorms_7 <- wm_records_names(name = c(raw_list_7), fuzzy = TRUE)
 TaxWormsTib_7 <- data.table::rbindlist(TaxWorms_7)
 
-TaxWorms_8 <- wm_records_names(name = c(raw_list_8))
+TaxWorms_8 <- wm_records_names(name = c(raw_list_8), fuzzy = TRUE)
 TaxWormsTib_8 <- data.table::rbindlist(TaxWorms_8)
 
-TaxWorms_9 <- wm_records_names(name = c(raw_list_9))
+TaxWorms_9 <- wm_records_names(name = c(raw_list_9), fuzzy = TRUE)
 TaxWormsTib_9 <- data.table::rbindlist(TaxWorms_9)
 
-TaxWorms_10 <- wm_records_names(name = c(raw_list_10))
+TaxWorms_10 <- wm_records_names(name = c(raw_list_10), fuzzy = TRUE)
 TaxWormsTib_10 <- data.table::rbindlist(TaxWorms_10)
 
-TaxWorms_11 <- wm_records_names(name = c(raw_list_11))
+TaxWorms_11 <- wm_records_names(name = c(raw_list_11), fuzzy = TRUE)
 TaxWormsTib_11 <- data.table::rbindlist(TaxWorms_11)
 
 # combine into single table
-
 all_taxa <- bind_rows(TaxWormsTib_1,
                       TaxWormsTib_2,
                       TaxWormsTib_3,
@@ -149,6 +148,11 @@ all_taxa <- bind_rows(TaxWormsTib_1,
                       TaxWormsTib_10,
                       TaxWormsTib_11) %>%
   rename(`Scientific Name` = scientificname)
+
+# remove unneeded data
+df_objects <- ls(pattern = "TaxWorms.*|raw_list_.*", envir = globalenv()) 
+df_list <- mget(df_objects, envir = globalenv()) 
+rm(list = df_objects)
 
 # get list of accepted duplicates to keep
 dupes <- all_taxa %>%
@@ -176,7 +180,55 @@ worms_taxa <- raw_spp %>%
   left_join(updated_taxa, by =  "Scientific Name") %>%
   mutate_all(funs(str_replace(., "â€™", "'")))
 
+# make Aphia ID numeric
+worms_taxa <- worms_taxa %>%
+  mutate(valid_AphiaID = as.numeric(valid_AphiaID))
 
+# scrape common names
+worms_nocommon <- worms_taxa %>%
+  filter(is.na(`Common Name`)) 
+common_names <- wm_common_id_(worms_nocommon$valid_AphiaID)
+
+# filter to english and prep for joining
+common_eng <- common_names %>%
+  filter(language_code == "eng") %>%
+  select(id, vernacular) %>%
+  group_by(id) %>% 
+  distinct() %>%
+  mutate(`Common Name` = paste0(vernacular,
+                                collapse = "; ")) %>%
+  select(id, `Common Name`) %>%
+  distinct() %>%
+  ungroup() %>%
+  mutate(valid_AphiaID = as.numeric(id), 
+         .keep = "unused")
+
+# join common names to dataset
+final_taxa <- worms_taxa %>%
+  left_join(common_eng, by = "valid_AphiaID") %>%
+  filter(`Scientific Name` %notin% c("(var. luxurians)",
+                                     "Aberinicola pacifica")) %>%
+  filter(status == "accepted" | is.na(status)) %>%
+  mutate(`Common Name` = coalesce(`Common Name.x`, `Common Name.y`), 
+         .keep = "unused",
+         .after = "SubGroup") %>%
+  select(valid_name, `Scientific Name`, `Common Name`,
+         `Status(TBD)`, Locality, 
+         rank, valid_AphiaID, valid_authority,
+         kingdom:citation, `Date Taxonomy Updated`,
+         source) %>%
+  ungroup() %>%
+  mutate(`Scientific Name` = coalesce(valid_name, `Scientific Name`),
+         .keep = "unused") %>%
+  distinct() %>%
+  arrange(`Scientific Name`, is.na(`Common Name`)) %>%
+  filter(!duplicated(`Scientific Name`))
+
+# worms only taxa
+marine_taxa <- final_taxa %>%
+  filter(!is.na(valid_AphiaID) & class %notin% c("Aves",
+                                              "Mammalia"))
+  
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # CHECK PLANT TAXA                                                          ####
@@ -204,7 +256,8 @@ plant_match <- reduced_plants %>%
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # write csv 
-write_csv(worms_taxa, "UpdatedTaxa.csv")
+write_csv(final_taxa, "UpdatedAllTaxa.csv")
+write_csv(marine_taxa, "UpdatedMarineTaxa.csv")
 
 ############### SUBSECTION HERE
 

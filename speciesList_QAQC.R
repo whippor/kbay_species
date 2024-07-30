@@ -266,6 +266,20 @@ write_csv(marine_taxa, "UpdatedMarineTaxa.csv")
 
 # SCRATCH PAD ####
 
+library(textclean)
+
+# post-save corrections to csv
+marinecsv <- read_csv("UpdatedMarineTaxa.csv")
+
+newmarinecsv <- marinecsv %>%
+  mutate(`Common Name` = replace_non_ascii(`Common Name`)) %>%
+  group_by(phylum) %>%
+  arrange(`Scientific Name`, .by_group = TRUE) %>%
+  filter(`Scientific Name` != "Plantae")
+
+
+write_csv(newmarinecsv, "UpdatedMarineTaxa.csv")
+ 
 
 
 
